@@ -278,7 +278,8 @@ class HybridMediaToolkit : HybridMediaToolkitSpec() {
         width = result.width,
         height = result.height,
         duration = result.duration,
-        mime = "audio/m4a"
+        mime = "audio/m4a",
+        encoder = result.encoder
       )
     }
   }
@@ -446,6 +447,7 @@ private fun Map<String, Any>.toMediaResult(): MediaResult {
     width    = (this["width"]   as? Number)?.toDouble() ?: 0.0,
     height   = (this["height"]  as? Number)?.toDouble() ?: 0.0,
     duration = (this["duration"]as? Number)?.toDouble() ?: 0.0,
-    mime     = this["mime"]     as? String ?: ""
+    mime     = this["mime"]     as? String ?: "",
+    encoder  = this["encoder"]  as? String
   )
 }

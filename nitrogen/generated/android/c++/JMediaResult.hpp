@@ -10,6 +10,7 @@
 #include <fbjni/fbjni.h>
 #include "MediaResult.hpp"
 
+#include <optional>
 #include <string>
 
 namespace margelo::nitro::mediatoolkit {
@@ -43,13 +44,16 @@ namespace margelo::nitro::mediatoolkit {
       double duration = this->getFieldValue(fieldDuration);
       static const auto fieldMime = clazz->getField<jni::JString>("mime");
       jni::local_ref<jni::JString> mime = this->getFieldValue(fieldMime);
+      static const auto fieldEncoder = clazz->getField<jni::JString>("encoder");
+      jni::local_ref<jni::JString> encoder = this->getFieldValue(fieldEncoder);
       return MediaResult(
         uri->toStdString(),
         size,
         width,
         height,
         duration,
-        mime->toStdString()
+        mime->toStdString(),
+        encoder != nullptr ? std::make_optional(encoder->toStdString()) : std::nullopt
       );
     }
 
@@ -59,7 +63,7 @@ namespace margelo::nitro::mediatoolkit {
      */
     [[maybe_unused]]
     static jni::local_ref<JMediaResult::javaobject> fromCpp(const MediaResult& value) {
-      using JSignature = JMediaResult(jni::alias_ref<jni::JString>, double, double, double, double, jni::alias_ref<jni::JString>);
+      using JSignature = JMediaResult(jni::alias_ref<jni::JString>, double, double, double, double, jni::alias_ref<jni::JString>, jni::alias_ref<jni::JString>);
       static const auto clazz = javaClassStatic();
       static const auto create = clazz->getStaticMethod<JSignature>("fromCpp");
       return create(
@@ -69,7 +73,8 @@ namespace margelo::nitro::mediatoolkit {
         value.width,
         value.height,
         value.duration,
-        jni::make_jstring(value.mime)
+        jni::make_jstring(value.mime),
+        value.encoder.has_value() ? jni::make_jstring(value.encoder.value()) : nullptr
       );
     }
   };

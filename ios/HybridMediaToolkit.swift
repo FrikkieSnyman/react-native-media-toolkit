@@ -706,7 +706,8 @@ private func makeMediaResult(_ raw: [String: Any]) -> MediaResult {
     width:    Double(raw["width"]    as? Int ?? 0),
     height:   Double(raw["height"]   as? Int ?? 0),
     duration: Double(raw["duration"] as? Int ?? 0),
-    mime:     raw["mime"]     as? String ?? ""
+    mime:     raw["mime"]     as? String ?? "",
+    encoder:  nil
   )
 }
 

@@ -529,6 +529,7 @@ interface MediaResult {
   height: number;   // output height in pixels
   duration: number; // duration in ms (0 for images)
   mime: string;     // MIME type, e.g. 'video/mp4'
+  encoder?: string; // Android video exports: '<default|software_encoder>:<codec>', see below
 }
 
 interface MediaMetadata {
@@ -612,6 +613,10 @@ Running `trimVideo` then `cropVideo` sequentially means two full encode passes: 
 Standard image processing operations can cause Out-Of-Memory (OOM) exceptions when decoding high-resolution images (e.g., 40MP+). To prevent this, the library handles decoding via **Load-Time Downsampling**:
 - **Android:** Utilizes `BitmapFactory.Options.inSampleSize` to subsample the image during the hardware decoding phase, bypassing full-resolution memory allocation entirely.
 - **iOS:** Uses `CGImageSourceCreateThumbnailAtIndex` to instruct `ImageIO` to decode and downscale directly from the file descriptor buffer.
+
+### Hardware encoder fallback (Android)
+
+Every video export tries Media3's default (hardware) encoder first. If the video encoder fails, at initialisation or mid-export (some devices reject a clip on the first frame, e.g. `OMX.qcom.video.encoder.avc` on a Samsung SM-A526B with `OMX_ErrorHardware`), the export runs once more with a software encoder before failing. `MediaResult.encoder` reports which one produced the file; a failure's message lists each attempt with Media3's error code and the `MediaCodec.CodecException` details, and logcat tag `VideoProcessor` carries the same.
 
 ### Smart Video Compression
 

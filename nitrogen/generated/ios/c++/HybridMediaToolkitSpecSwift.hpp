@@ -56,8 +56,8 @@ namespace margelo::nitro::mediatoolkit { struct LocationData; }
 #include "MediaResult.hpp"
 #include <NitroModules/Promise.hpp>
 #include <string>
-#include "CropOptions.hpp"
 #include <optional>
+#include "CropOptions.hpp"
 #include "CompressImageOptions.hpp"
 #include <vector>
 #include "SplitImageOptions.hpp"
