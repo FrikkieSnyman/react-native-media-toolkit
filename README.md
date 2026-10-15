@@ -471,11 +471,11 @@ If none of the three are passed, the library falls back to `quality: 'medium'`.
 | `bitrate` | `number` | — | **Optional.** Explicit target bitrate in bps. Overrides `quality`; ignored if `targetSizeInMB` is set. |
 | `width` | `number` | original | **Optional.** Max output width in px (aspect ratio preserved). |
 | `muteAudio` | `boolean` | `false` | **Optional.** Strip audio track from the output. |
-| `startTime` | `number` | `0` | **Optional.** Trim start in ms. Compresses only `[startTime, endTime]` in the same encode pass. |
-| `endTime` | `number` | video end | **Optional.** Trim end in ms. |
+| `startTime` | `number` | `0` | **Optional.** Trim start in ms. Compresses only `[startTime, endTime]` in the same encode pass. Must be finite and nonnegative. |
+| `endTime` | `number` | video end | **Optional.** Trim end in ms. Must be finite, greater than `startTime`, and within the video duration. An explicit `0` is invalid. |
 | `outputPath` | `string` | temp file | **Optional.** Absolute path for the output file. |
 
-When a trim range is given, `targetSizeInMB` budgets the trimmed duration (not the whole file), the "target must be smaller than the original" check is skipped since the range's size is only an estimate, and an empty range rejects with `invalidInput` before any session starts. Prefer this over `trimVideo` followed by `compressVideo`: a trim that does not start on a keyframe is a full re-encode at the source resolution on Android, so the two-step path encodes twice.
+When a trim range is given, `targetSizeInMB` budgets the trimmed duration (not the whole file), the "target must be smaller than the original" check is skipped since the range's size is only an estimate, and invalid ranges reject with `invalidInput` before any session starts. Ranges must span at least one millisecond; omitted bounds default to the start/end, while negative, non-finite, reversed, empty, or out-of-bounds values are rejected. A trimmed export is never replaced with the full source if encoding increases its size, including the explicit-bitrate iOS path. Prefer this over `trimVideo` followed by `compressVideo`: a trim that does not start on a keyframe is a full re-encode at the source resolution on Android, so the two-step path encodes twice.
 
 ### `getThumbnail(uri, options?): Promise<ThumbnailResult>`
 

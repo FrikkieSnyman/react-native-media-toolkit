@@ -388,8 +388,8 @@ internal object VideoProcessor {
   fun compressVideo(
     context: Context,
     uri: String,
-    startMs: Long,         // 0 = from the start
-    endMs: Long,           // 0 = to the end
+    startMs: Double?,      // null = from the start
+    endMs: Double?,        // null = to the end
     quality: String,
     bitrate: Int,          // 0 = use quality preset (matches iOS behaviour)
     targetSizeInMB: Double,
@@ -401,20 +401,6 @@ internal object VideoProcessor {
   ): Map<String, Any> {
     val out = outputPath ?: tempPath()
     val mediaUri = toAndroidUri(uri)
-    // Trim inside the same transform so the encoder only ever runs at the
-    // output resolution; a separate trim would re-encode at source resolution.
-    val trimRequested = startMs > 0 || endMs > 0
-    val mediaItemBuilder = MediaItem.Builder().setUri(mediaUri)
-    if (trimRequested) {
-      mediaItemBuilder.setClippingConfiguration(
-        androidx.media3.common.MediaItem.ClippingConfiguration.Builder()
-          .setStartPositionMs(maxOf(startMs, 0L))
-          .setEndPositionMs(if (endMs > 0) endMs else androidx.media3.common.C.TIME_END_OF_SOURCE)
-          .build()
-      )
-    }
-    val mediaItem = mediaItemBuilder.build()
-
     // Get duration and dimensions using MediaMetadataRetriever
     var durationMs = 0L
     var videoW = 0
@@ -470,17 +456,28 @@ internal object VideoProcessor {
         android.util.Log.e("VideoProcessor", "Metadata extraction failed", e)
     }
 
-    if (trimRequested && durationMs > 0) {
-        val trimEndMs = if (endMs > 0) minOf(endMs, durationMs) else durationMs
-        val trimStartMs = maxOf(startMs, 0L).coerceAtMost(trimEndMs)
-        val trimDurationMs = trimEndMs - trimStartMs
-        if (trimDurationMs <= 0) {
-            throw MediaToolkitException.InvalidInput("Trim range [${startMs}, ${endMs}]ms is empty for a ${durationMs}ms video.")
-        }
+    val trimRange = try {
+      VideoTrimRange.resolve(startMs, endMs, durationMs)
+    } catch (e: IllegalArgumentException) {
+      throw MediaToolkitException.InvalidInput(e.message ?: "Invalid trim range")
+    }
+    val trimRequested = trimRange != null
+    // Validate before creating Media3's clipping configuration so all invalid
+    // ranges reject as InvalidInput, including reversed and out-of-bounds ranges.
+    val mediaItemBuilder = MediaItem.Builder().setUri(mediaUri)
+    if (trimRange != null) {
+        mediaItemBuilder.setClippingConfiguration(
+          MediaItem.ClippingConfiguration.Builder()
+            .setStartPositionMs(trimRange.startMs)
+            .setEndPositionMs(trimRange.endMs)
+            .build()
+        )
+        val trimDurationMs = trimRange.endMs - trimRange.startMs
         // Budget the trimmed range, not the whole source.
         origSizeMB = origSizeMB * trimDurationMs / durationMs
         durationMs = trimDurationMs
     }
+    val mediaItem = mediaItemBuilder.build()
 
     var computedBitrate = 0
     var finalWidth = videoW

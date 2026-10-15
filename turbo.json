@@ -15,7 +15,8 @@
         "example/android",
         "!example/android/.gradle",
         "!example/android/build",
-        "!example/android/app/build"
+        "!example/android/app/build",
+        "$TURBO_ROOT$/tests/fixtures/**"
       ],
       "outputs": []
     },

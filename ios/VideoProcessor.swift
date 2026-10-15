@@ -745,11 +745,10 @@ class VideoProcessor: NSObject {
 
   // ─── COMPRESS ────────────────────────────────────────────────────────────
 
-  @objc
   static func compressVideo(
     uri: String,
-    startMs: Double,
-    endMs: Double,
+    startMs: Double?,
+    endMs: Double?,
     quality: String,
     bitrate: Double,
     targetSizeInMB: Double,
@@ -765,26 +764,24 @@ class VideoProcessor: NSObject {
       return
     }
 
-    let out = outputPath ?? tempPath(ext: "mp4")
-    let outURL = URL(fileURLWithPath: out)
-    removeIfExists(outURL)
-
     // Trim inside the same export so the encoder only ever runs at the output
     // resolution; a separate trim would re-encode at source resolution.
     let sourceDurationSecs = asset.duration.seconds
     var trimRange: CMTimeRange? = nil
-    if startMs > 0 || endMs > 0 {
-      let trimEndSecs = endMs > 0 ? min(endMs / 1000.0, sourceDurationSecs) : sourceDurationSecs
-      let trimStartSecs = min(max(startMs / 1000.0, 0), trimEndSecs)
-      guard trimEndSecs > trimStartSecs else {
-        completion(nil, MediaToolkitError.invalidInput("Trim range [\(startMs), \(endMs)]ms is empty for a \(Int(sourceDurationSecs * 1000))ms video."))
-        return
+    do {
+      if let range = try VideoTrimRange.resolve(startMs: startMs, endMs: endMs, durationMs: sourceDurationSecs * 1000) {
+        trimRange = CMTimeRange(
+          start: CMTime(seconds: range.startMs / 1000, preferredTimescale: 1_000_000),
+          end: CMTime(seconds: range.endMs / 1000, preferredTimescale: 1_000_000)
+        )
       }
-      trimRange = CMTimeRange(
-        start: CMTime(seconds: trimStartSecs, preferredTimescale: 600),
-        end: CMTime(seconds: trimEndSecs, preferredTimescale: 600)
-      )
+    } catch {
+      completion(nil, MediaToolkitError.invalidInput(error.localizedDescription))
+      return
     }
+    let out = outputPath ?? tempPath(ext: "mp4")
+    let outURL = URL(fileURLWithPath: out)
+    removeIfExists(outURL)
     let durationSecs = trimRange?.duration.seconds ?? sourceDurationSecs
     // Budget the trimmed range, not the whole source.
     let trimFraction = sourceDurationSecs > 0 ? durationSecs / sourceDurationSecs : 1.0
@@ -968,18 +965,12 @@ class VideoProcessor: NSObject {
 
         // Fallback: If encoder inflates the file beyond original size,
         // revert to original to prevent making it worse. (Matches Android behavior)
-        if !muteAudio, trimRange == nil,
-           let sourceURL = (asset as? AVURLAsset)?.url, sourceURL.isFileURL,
-           let origAttr = try? FileManager.default.attributesOfItem(atPath: sourceURL.path),
-           let origSize = origAttr[.size] as? Int64, origSize > 0,
-           let outAttr = try? FileManager.default.attributesOfItem(atPath: out),
-           let outSize = outAttr[.size] as? Int64, outSize > origSize {
-          let origMB = Double(origSize) / (1024.0 * 1024.0)
-          let outMB = Double(outSize) / (1024.0 * 1024.0)
-          NSLog("[MediaToolkit] Encoder inflated file from %.1fMB to %.1fMB. Reverting to original.", origMB, outMB)
-          try? FileManager.default.removeItem(at: outURL)
-          try? FileManager.default.copyItem(at: sourceURL, to: outURL)
-        }
+        VideoCompressionFallback.restoreOriginalIfLarger(
+          sourceURL: (asset as? AVURLAsset)?.url,
+          outputURL: outURL,
+          hasTrimRange: trimRange != nil,
+          muteAudio: muteAudio
+        )
 
         let durationMs = durationSecs * 1000
         completion(videoResult(path: out, asset: asset, trimmed: durationMs), nil)
@@ -1289,18 +1280,12 @@ class VideoProcessor: NSObject {
 
           // Anti-inflation fallback: if output is larger than original, revert.
           // (Matches AVAssetExportSession path and Android behavior)
-          if !muteAudio,
-             let sourceURL = (asset as? AVURLAsset)?.url, sourceURL.isFileURL,
-             let origAttr = try? FileManager.default.attributesOfItem(atPath: sourceURL.path),
-             let origSize = origAttr[.size] as? Int64, origSize > 0,
-             let outAttr = try? FileManager.default.attributesOfItem(atPath: outPath),
-             let outSize = outAttr[.size] as? Int64, outSize > origSize {
-            let origMB = Double(origSize) / (1024.0 * 1024.0)
-            let outMB = Double(outSize) / (1024.0 * 1024.0)
-            NSLog("[MediaToolkit] Encoder inflated file from %.1fMB to %.1fMB. Reverting to original.", origMB, outMB)
-            try? FileManager.default.removeItem(at: outputURL)
-            try? FileManager.default.copyItem(at: sourceURL, to: outputURL)
-          }
+          VideoCompressionFallback.restoreOriginalIfLarger(
+            sourceURL: (asset as? AVURLAsset)?.url,
+            outputURL: outputURL,
+            hasTrimRange: timeRange != nil,
+            muteAudio: muteAudio
+          )
 
           let durationMs = asset.duration.seconds * 1000
           completion(videoResult(path: outPath, asset: asset, trimmed: durationMs), nil)
