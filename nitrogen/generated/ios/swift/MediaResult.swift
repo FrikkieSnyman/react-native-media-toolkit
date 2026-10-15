@@ -18,8 +18,14 @@ public extension MediaResult {
   /**
    * Create a new instance of `MediaResult`.
    */
-  init(uri: String, size: Double, width: Double, height: Double, duration: Double, mime: String) {
-    self.init(std.string(uri), size, width, height, duration, std.string(mime))
+  init(uri: String, size: Double, width: Double, height: Double, duration: Double, mime: String, encoder: String?) {
+    self.init(std.string(uri), size, width, height, duration, std.string(mime), { () -> bridge.std__optional_std__string_ in
+      if let __unwrappedValue = encoder {
+        return bridge.create_std__optional_std__string_(std.string(__unwrappedValue))
+      } else {
+        return .init()
+      }
+    }())
   }
 
   @inline(__always)
@@ -50,5 +56,17 @@ public extension MediaResult {
   @inline(__always)
   var mime: String {
     return String(self.__mime)
+  }
+  
+  @inline(__always)
+  var encoder: String? {
+    return { () -> String? in
+      if bridge.has_value_std__optional_std__string_(self.__encoder) {
+        let __unwrapped = bridge.get_std__optional_std__string_(self.__encoder)
+        return String(__unwrapped)
+      } else {
+        return nil
+      }
+    }()
   }
 }

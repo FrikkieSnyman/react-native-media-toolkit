@@ -35,7 +35,10 @@ data class MediaResult(
   val duration: Double,
   @DoNotStrip
   @Keep
-  val mime: String
+  val mime: String,
+  @DoNotStrip
+  @Keep
+  val encoder: String?
 ) {
   /* primary constructor */
 
@@ -48,6 +51,7 @@ data class MediaResult(
       && Objects.deepEquals(this.height, other.height)
       && Objects.deepEquals(this.duration, other.duration)
       && Objects.deepEquals(this.mime, other.mime)
+      && Objects.deepEquals(this.encoder, other.encoder)
   }
 
   override fun hashCode(): Int {
@@ -57,7 +61,8 @@ data class MediaResult(
       width,
       height,
       duration,
-      mime
+      mime,
+      encoder
     ).contentDeepHashCode()
   }
 
@@ -69,8 +74,8 @@ data class MediaResult(
     @Keep
     @Suppress("unused")
     @JvmStatic
-    private fun fromCpp(uri: String, size: Double, width: Double, height: Double, duration: Double, mime: String): MediaResult {
-      return MediaResult(uri, size, width, height, duration, mime)
+    private fun fromCpp(uri: String, size: Double, width: Double, height: Double, duration: Double, mime: String, encoder: String?): MediaResult {
+      return MediaResult(uri, size, width, height, duration, mime, encoder)
     }
   }
 }

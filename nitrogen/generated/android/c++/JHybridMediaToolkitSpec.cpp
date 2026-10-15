@@ -53,6 +53,7 @@ namespace margelo::nitro::mediatoolkit { struct GeneratePreviewOptions; }
 #include <NitroModules/JPromise.hpp>
 #include "JMediaResult.hpp"
 #include <string>
+#include <optional>
 #include <vector>
 #include "ThumbnailResult.hpp"
 #include "JThumbnailResult.hpp"
@@ -60,7 +61,6 @@ namespace margelo::nitro::mediatoolkit { struct GeneratePreviewOptions; }
 #include "JConcatResult.hpp"
 #include "MediaMetadata.hpp"
 #include "JMediaMetadata.hpp"
-#include <optional>
 #include "LocationData.hpp"
 #include "JLocationData.hpp"
 #include "CropOptions.hpp"
