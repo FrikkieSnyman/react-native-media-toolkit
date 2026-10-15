@@ -210,6 +210,8 @@ The compressor supports two modes. Use **one** of them:
 const result = await MediaToolkit.compressVideo(videoUri, {
   targetSizeInMB: 8,   // required for this mode — target output size in MB
   minResolution: 480,  // optional — minimum short-edge resolution (auto-calculated if omitted)
+  startTime: 2000,     // optional — trim range in ms, encoded in the same pass
+  endTime: 7000,
   muteAudio: false,    // optional — strip audio track (default false)
   width: 1280,         // optional — max output width, aspect ratio preserved
 });
@@ -469,7 +471,11 @@ If none of the three are passed, the library falls back to `quality: 'medium'`.
 | `bitrate` | `number` | — | **Optional.** Explicit target bitrate in bps. Overrides `quality`; ignored if `targetSizeInMB` is set. |
 | `width` | `number` | original | **Optional.** Max output width in px (aspect ratio preserved). |
 | `muteAudio` | `boolean` | `false` | **Optional.** Strip audio track from the output. |
+| `startTime` | `number` | `0` | **Optional.** Trim start in ms. Compresses only `[startTime, endTime]` in the same encode pass. |
+| `endTime` | `number` | video end | **Optional.** Trim end in ms. |
 | `outputPath` | `string` | temp file | **Optional.** Absolute path for the output file. |
+
+When a trim range is given, `targetSizeInMB` budgets the trimmed duration (not the whole file), the "target must be smaller than the original" check is skipped since the range's size is only an estimate, and an empty range rejects with `invalidInput` before any session starts. Prefer this over `trimVideo` followed by `compressVideo`: a trim that does not start on a keyframe is a full re-encode at the source resolution on Android, so the two-step path encodes twice.
 
 ### `getThumbnail(uri, options?): Promise<ThumbnailResult>`
 

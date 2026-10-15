@@ -157,6 +157,8 @@ class HybridMediaToolkit: HybridMediaToolkitSpec {
       try await withCheckedThrowingContinuation { continuation in
         VideoProcessor.compressVideo(
           uri: uri,
+          startMs: options.startTime ?? 0,
+          endMs: options.endTime ?? 0,
           quality: options.quality ?? "medium",
           bitrate: options.bitrate ?? 0,
           targetSizeInMB: options.targetSizeInMB ?? 0,
