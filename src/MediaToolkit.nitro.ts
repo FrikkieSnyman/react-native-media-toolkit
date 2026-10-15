@@ -15,6 +15,11 @@ export interface MediaResult {
   duration: number;
   /** MIME type e.g. "image/jpeg" */
   mime: string;
+  /**
+   * Video encoder configuration and codec that produced the file, e.g.
+   * "default:OMX.qcom.video.encoder.avc" (Android video exports only)
+   */
+  encoder?: string;
 }
 
 export interface LocationData {

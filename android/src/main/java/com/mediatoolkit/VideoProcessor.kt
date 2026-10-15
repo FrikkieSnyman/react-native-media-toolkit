@@ -1,22 +1,29 @@
 package com.margelo.nitro.com.mediatoolkit
 
 import android.content.Context
+import android.media.MediaCodec
 import android.net.Uri
+import android.util.Log
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.transformer.Composition
+import androidx.media3.transformer.DefaultEncoderFactory
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
+import androidx.media3.transformer.EncoderSelector
+import androidx.media3.transformer.EncoderUtil
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.ProgressHolder
 import androidx.media3.transformer.Transformer
+import androidx.media3.transformer.VideoEncoderSettings
 import androidx.media3.effect.Presentation
 import androidx.media3.effect.ScaleAndRotateTransformation
 import androidx.media3.effect.SpeedChangeEffect
 import androidx.media3.common.audio.SonicAudioProcessor
 import androidx.media3.common.util.UnstableApi
+import com.google.common.collect.ImmutableList
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
@@ -27,6 +34,7 @@ import java.util.concurrent.CountDownLatch
  */
 @UnstableApi
 internal object VideoProcessor {
+  private const val TAG = "VideoProcessor"
   private const val MAX_GIF_TOTAL_PIXELS = 40_000_000L
 
   // ─── TRIM ────────────────────────────────────────────────────────────────
@@ -52,7 +60,7 @@ internal object VideoProcessor {
       .setClippingConfiguration(clippingConfig)
       .build()
 
-    return runTransform(context, mediaItem, effects = Effects.EMPTY, out, onProgress, transmux = true)
+    return runTransform(context, mediaItem, effects = Effects.EMPTY, out, onProgress)
   }
 
   // ─── CROP ────────────────────────────────────────────────────────────────
@@ -120,7 +128,7 @@ internal object VideoProcessor {
     val effects = Effects(emptyList(), listOf(cropEffect))
 
     // Must re-encode for crop, but only ONE pass (faster than trim then crop)
-    return runTransform(context, mediaItem, effects, out, onProgress, transmux = false)
+    return runTransform(context, mediaItem, effects, out, onProgress)
   }
 
   // ─── PROCESS (Trim + Crop + Flip + Rotate) ───────────────────────────────
@@ -186,11 +194,11 @@ internal object VideoProcessor {
 
     val effects = Effects(emptyList(), effectList)
 
-    // processVideo always re-encodes (transmux = false). Without an explicit bitrate,
+    // processVideo always re-encodes. Without an explicit bitrate,
     // Media3 Transformer picks a very low default, causing severe blur.
     // 4 Mbps balances quality vs file size — locket clips are short (2-5s) so this
     // keeps video sharp enough while not inflating size before compressVideo.
-    return runTransform(context, mediaItem, effects, out, onProgress, transmux = false, targetBitrate = 4_000_000)
+    return runTransform(context, mediaItem, effects, out, onProgress, targetBitrate = 4_000_000)
   }
 
   // ─── ROTATE ──────────────────────────────────────────────────────────────
@@ -720,23 +728,69 @@ internal object VideoProcessor {
 
   // ─── Core ────────────────────────────────────────────────────────────────
 
+  // A device whose hardware encoder rejects the export (Samsung SM-A526B, OMX.qcom.video.encoder.avc:
+  // OMX_ErrorHardware on the first surface frame for some clips, regardless of output size,
+  // orientation, colour tags or performance hints) reports the fallback through the result's
+  // `encoder` field and the VideoProcessor logcat lines.
+  private enum class EncoderAttempt {
+    DEFAULT,
+    // Media3's default selector only offers hardware encoders when the device has any.
+    SOFTWARE_ENCODER,
+  }
+
   private fun runTransform(
     context: Context,
     mediaItem: MediaItem,
     effects: Effects,
     outputPath: String,
     onProgress: (Int) -> Unit,
-    transmux: Boolean = false,
     targetBitrate: Int = 0,        // 0 = let Media3 decide
     removeAudio: Boolean = false,  // true = strip audio track
     removeVideo: Boolean = false   // true = strip video track
   ): Map<String, Any> {
     val outFile = File(outputPath)
     outFile.parentFile?.mkdirs()
-    if (outFile.exists()) outFile.delete()
 
+    val failures = mutableListOf<String>()
+    for (attempt in EncoderAttempt.values()) {
+      if (outFile.exists()) outFile.delete()
+      try {
+        val encoderName = export(context, mediaItem, effects, outputPath, onProgress, targetBitrate, removeAudio, removeVideo, attempt)
+        val encoder = "${attempt.name.lowercase()}:${encoderName ?: "none"}"
+        if (failures.isEmpty()) {
+          Log.i(TAG, "Export used $encoder")
+        } else {
+          Log.w(TAG, "Export used $encoder after: ${failures.joinToString(" || ")}")
+        }
+        return buildResult(outputPath, 0) + ("encoder" to encoder)
+      } catch (e: ExportException) {
+        failures += "${attempt.name.lowercase()}: ${describe(e)}"
+        if (!isVideoEncoderFailure(e)) break
+        Log.w(TAG, "Video encoder failed, trying the next configuration: ${failures.last()}")
+      } catch (e: Exception) {
+        failures += "${attempt.name.lowercase()}: ${e.javaClass.simpleName}: ${e.message}"
+        break
+      }
+    }
+    if (outFile.exists()) outFile.delete()
+    throw MediaToolkitException.ProcessingFailed("Transform failed: ${failures.joinToString(" || ")}")
+  }
+
+  /** Runs one export and returns the name of the video encoder Media3 used, if any. */
+  private fun export(
+    context: Context,
+    mediaItem: MediaItem,
+    effects: Effects,
+    outputPath: String,
+    onProgress: (Int) -> Unit,
+    targetBitrate: Int,
+    removeAudio: Boolean,
+    removeVideo: Boolean,
+    attempt: EncoderAttempt
+  ): String? {
     val latch = CountDownLatch(1)
     var exportError: Exception? = null
+    var videoEncoderName: String? = null
 
     val editedItemBuilder = EditedMediaItem.Builder(mediaItem)
       .setEffects(effects)
@@ -751,6 +805,7 @@ internal object VideoProcessor {
     val transformerBuilder = Transformer.Builder(context)
       .addListener(object : Transformer.Listener {
         override fun onCompleted(composition: Composition, result: ExportResult) {
+          videoEncoderName = result.videoEncoderName
           latch.countDown()
         }
         override fun onError(composition: Composition, result: ExportResult, exception: ExportException) {
@@ -758,26 +813,9 @@ internal object VideoProcessor {
           latch.countDown()
         }
       })
-
-    if (transmux) {
-      // Passthrough: remux without re-encoding — fast trim
-      transformerBuilder.setVideoMimeType(MimeTypes.VIDEO_H264)
-    } else {
-      if (targetBitrate > 0) {
-        val videoSettings = androidx.media3.transformer.VideoEncoderSettings.Builder()
-            .setBitrate(targetBitrate)
-            .build()
-        val encoderFactory = androidx.media3.transformer.DefaultEncoderFactory.Builder(context)
-            .setRequestedVideoEncoderSettings(videoSettings)
-            .build()
-        transformerBuilder.setEncoderFactory(encoderFactory)
-        // Use H.264: more mature encoders on Android, better bitrate compliance than HEVC.
-        transformerBuilder.setVideoMimeType(MimeTypes.VIDEO_H264)
-      } else {
-        transformerBuilder.setVideoMimeType(MimeTypes.VIDEO_H264)
-      }
-    }
-
+      // Use H.264: more mature encoders on Android, better bitrate compliance than HEVC.
+      .setVideoMimeType(MimeTypes.VIDEO_H264)
+      .setEncoderFactory(buildEncoderFactory(context, targetBitrate, attempt))
     val transformer = transformerBuilder.build()
 
     // Run on main thread (Media3 requirement), then wait
@@ -810,9 +848,46 @@ internal object VideoProcessor {
 
     latch.await()
 
-    exportError?.let { throw MediaToolkitException.ProcessingFailed("Transform failed: ${it.message}") }
+    exportError?.let { throw it }
+    return videoEncoderName
+  }
 
-    return buildResult(outputPath, 0)
+  private fun buildEncoderFactory(context: Context, targetBitrate: Int, attempt: EncoderAttempt): DefaultEncoderFactory {
+    val settings = VideoEncoderSettings.Builder()
+    if (targetBitrate > 0) {
+      settings.setBitrate(targetBitrate)
+    }
+    val builder = DefaultEncoderFactory.Builder(context)
+      .setRequestedVideoEncoderSettings(settings.build())
+    if (attempt == EncoderAttempt.SOFTWARE_ENCODER) {
+      builder.setVideoEncoderSelector(softwareVideoEncoderSelector)
+    }
+    return builder.build()
+  }
+
+  private val softwareVideoEncoderSelector = EncoderSelector { mimeType ->
+    ImmutableList.copyOf(
+      EncoderUtil.getSupportedEncoders(mimeType).filterNot { EncoderUtil.isHardwareAccelerated(it, mimeType) }
+    )
+  }
+
+  // Covers init failures and errors MediaCodec reports asynchronously once running
+  // (ERROR_CODE_ENCODING_FAILED), e.g. OMX_ErrorHardware on the first input frame.
+  private fun isVideoEncoderFailure(e: ExportException): Boolean {
+    val codec = e.codecInfo ?: return false
+    return codec.isVideo && !codec.isDecoder
+  }
+
+  private fun describe(e: ExportException): String {
+    val cause = e.cause
+    val causeDetails = when (cause) {
+      null -> null
+      is MediaCodec.CodecException ->
+        "CodecException(errorCode=${cause.errorCode}, transient=${cause.isTransient}, " +
+          "recoverable=${cause.isRecoverable}, diagnostic=${cause.diagnosticInfo}): ${cause.message}"
+      else -> "${cause.javaClass.simpleName}: ${cause.message}"
+    }
+    return listOfNotNull(ExportException.getErrorCodeName(e.errorCode), e.message, causeDetails).joinToString(" | ")
   }
 
 
